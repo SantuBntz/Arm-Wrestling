@@ -1,0 +1,14 @@
+{
+  "name": "arm-wrestling",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Arm Wrestling 1v1 con quick time event, websocket + cloudflared",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "online": "node online.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

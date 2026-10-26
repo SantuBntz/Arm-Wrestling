@@ -1,0 +1,1356 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Arm Wrestling</title>
+<style>
+  :root {
+    --wall: #34322d;
+    --panel: #44413a;
+    --bone: #ece4cf;
+    --rust: #c2562f;
+    --dim: #a39d8c;
+    --miss: #d8412f;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--wall);
+    color: var(--bone);
+    font-family: "Segoe UI", system-ui, sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  h1, .display {
+    font-family: Impact, "Arial Narrow", sans-serif;
+    font-weight: 400;
+    letter-spacing: 0.04em;
+  }
+  h1 { font-size: 3.2rem; margin: 0 0 0.4rem; }
+  p { color: var(--dim); margin: 0.4rem 0; }
+  .screen { display: none; width: 100%; max-width: 920px; padding: 24px; text-align: center; }
+  .screen.on { display: block; }
+  .row { display: flex; gap: 12px; justify-content: center; align-items: center; margin-top: 1.2rem; flex-wrap: wrap; }
+  button {
+    font: inherit; color: var(--bone); background: var(--rust);
+    border: 0; border-radius: 4px; padding: 0.7rem 1.4rem; cursor: pointer;
+  }
+  button:hover { filter: brightness(1.12); }
+  button:disabled { opacity: 0.5; cursor: default; filter: none; }
+  button.quiet { background: var(--panel); }
+  input {
+    font: inherit; width: 7.5rem; text-align: center; text-transform: uppercase;
+    letter-spacing: 0.25em; padding: 0.65rem; border-radius: 4px;
+    border: 2px solid var(--dim); background: var(--panel); color: var(--bone);
+  }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--bone); outline-offset: 2px; }
+  #msg { min-height: 1.4rem; color: var(--miss); margin-top: 1rem; }
+  .code { font-size: 4rem; letter-spacing: 0.3em; margin: 0.6rem 0; }
+  #link { word-break: break-all; }
+
+  /* ---- Partida: la escena 3D es el fondo y la interfaz flota encima ---- */
+  #scene { display: block; position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; }
+  #vignette {
+    display: none; position: fixed; inset: 0; z-index: 1; pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 55%, rgba(0, 0, 0, 0.6) 100%);
+  }
+  body.ingame #vignette { display: block; }
+
+  #game.screen { position: fixed; inset: 0; z-index: 2; max-width: none; padding: 0; pointer-events: none; }
+  #game button { pointer-events: auto; }
+
+  #hud {
+    position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 32px; padding: 6px 28px;
+    background: rgba(20, 20, 18, 0.6); border-radius: 6px;
+  }
+  #hud .score { font-size: 2.4rem; line-height: 1.1; }
+  #hud .who { font-size: 0.85rem; color: var(--dim); }
+  #timer { font-size: 2.2rem; min-width: 2.2ch; }
+
+  #mute {
+    position: absolute; top: 12px; left: 16px; padding: 0.4rem 0.8rem; font-size: 0.85rem;
+    background: rgba(20, 20, 18, 0.6);
+  }
+  #you { position: absolute; left: 16px; bottom: 16px; }
+  #rival { position: absolute; right: 16px; top: 12px; }
+  #dials canvas { filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.5)); }
+  #hint { position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%); font-size: 0.85rem; margin: 0; white-space: nowrap; }
+
+  #big {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    font-size: 8rem; text-shadow: 0 4px 0 rgba(0, 0, 0, 0.5);
+  }
+  #end {
+    position: absolute; top: 30%; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 28px; padding: 12px 28px;
+    background: rgba(20, 20, 18, 0.85); border-radius: 8px; white-space: nowrap;
+  }
+  #end[hidden] { display: none; }
+  #result { font-size: 2rem; margin: 0; color: var(--bone); }
+  @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto; } }
+
+  /* ---- Arm Wrestling: menú, cinemática y nombres ---- */
+  h1 { text-shadow: 3px 3px 0 var(--rust); }
+  #lobby, #waiting { position: relative; z-index: 3; }
+  body.menu #vignette { display: block; background: radial-gradient(ellipse at center, rgba(10, 10, 8, 0.4) 0%, rgba(0, 0, 0, 0.88) 100%); }
+  .logo { display: flex; flex-direction: column; align-items: center; transform: rotate(-2deg); filter: drop-shadow(0 6px 0 rgba(0, 0, 0, 0.55)); }
+  .logo span { font-family: Impact, "Arial Narrow", sans-serif; text-transform: uppercase; line-height: 1; }
+  .logo .l1 {
+    font-size: clamp(2.2rem, 7vw, 3.6rem); letter-spacing: 0.45em; padding: 0.08em 0.5em 0.08em 0.95em; color: #fff;
+    background: var(--rust); clip-path: polygon(5% 0, 100% 0, 95% 100%, 0 100%);
+  }
+  .logo .l2 {
+    font-size: clamp(2.6rem, 11vw, 6.6rem); letter-spacing: 0.04em; color: var(--bone);
+    -webkit-text-stroke: 2px #1b1a17; text-shadow: 5px 5px 0 var(--rust);
+  }
+  .sub { letter-spacing: 0.08em; margin-top: 1.1rem; }
+  .panel {
+    margin: 1.4rem auto 0; padding: 1.6rem 1.8rem; width: min(430px, 92vw);
+    background: rgba(20, 20, 18, 0.74); backdrop-filter: blur(6px);
+    clip-path: polygon(0 0, calc(100% - 22px) 0, 100% 22px, 100% 100%, 22px 100%, 0 calc(100% - 22px));
+  }
+  #waiting.panel { max-width: 560px; }
+  .or { color: var(--dim); font-size: 0.75rem; margin: 1.2rem 0 0; letter-spacing: 0.25em; text-transform: uppercase; }
+  button {
+    clip-path: polygon(10px 0, 100% 0, calc(100% - 10px) 100%, 0 100%);
+    text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; transition: transform 0.12s, filter 0.12s;
+  }
+  button:hover:not(:disabled) { transform: translateY(-2px) scale(1.03); }
+  button.big { font-size: 1.3rem; padding: 0.95rem 3rem; background: linear-gradient(180deg, #e8733f, var(--rust)); animation: pulse 1.8s ease-in-out infinite; }
+  button.big:disabled { animation: none; }
+  @keyframes pulse { 50% { filter: brightness(1.18); } }
+  .who { text-transform: uppercase; letter-spacing: 0.1em; }
+
+  #stage.screen { position: fixed; inset: 0; z-index: 2; max-width: none; padding: 0; pointer-events: none; }
+  #stage button, #stage input, #namecard { pointer-events: auto; }
+  .bar { position: absolute; left: 0; right: 0; height: 9vh; background: #000; transition: height 0.9s; }
+  .bar.t { top: 0; }
+  .bar.b { bottom: 0; }
+  #stage.names .bar { height: 0; }
+  #skip { position: absolute; right: 18px; bottom: calc(9vh + 14px); }
+  #stage.names #skip { display: none; }
+  .nametag {
+    position: absolute; transform: translate(-50%, -100%); display: none; white-space: nowrap;
+    padding: 0.25rem 1rem; background: rgba(20, 20, 18, 0.82); border-bottom: 3px solid var(--rust);
+    font-family: Impact, "Arial Narrow", sans-serif; font-size: 1.3rem; letter-spacing: 0.08em; text-transform: uppercase;
+  }
+  #namecard {
+    position: absolute; left: 50%; bottom: 6%; transform: translateX(-50%); padding: 1rem 2rem 0.8rem;
+    background: rgba(20, 20, 18, 0.85); width: min(460px, 92vw);
+    clip-path: polygon(0 0, calc(100% - 20px) 0, 100% 20px, 100% 100%, 20px 100%, 0 calc(100% - 20px));
+  }
+  #namecard[hidden] { display: none; }
+  #namecard h2 { margin: 0; font-size: 1.7rem; font-weight: 400; letter-spacing: 0.06em; }
+  #myname { width: 15rem; letter-spacing: 0.1em; }
+  #rivalstate { margin: 0.7rem 0 0; font-size: 0.85rem; }
+  #fade { position: fixed; inset: 0; background: #000; opacity: 0; pointer-events: none; transition: opacity 0.35s; z-index: 9; }
+  #fade.on { opacity: 1; }
+  #fs { position: fixed; right: 16px; bottom: 16px; z-index: 8; padding: 0.4rem 0.8rem; font-size: 0.85rem; background: rgba(20, 20, 18, 0.6); }
+  #fs[hidden] { display: none; }
+  #end { gap: 18px; }
+</style>
+</head>
+<body>
+
+<canvas id="scene"></canvas>
+<div id="vignette"></div>
+<div id="fade"></div>
+<button id="fs" class="quiet" hidden>Pantalla completa</button>
+
+<!-- Menú -->
+<section id="lobby" class="screen on">
+  <div class="logo"><span class="l1">ARM</span><span class="l2">WRESTLING</span></div>
+  <p class="sub">Duelo 1 contra 1 · Clickeá justo cuando la flecha cruza la zona amarilla</p>
+  <div class="panel">
+    <button id="create" class="big" disabled>Crear sala</button>
+    <div class="or">o unite con un código</div>
+    <div class="row">
+      <input id="code" maxlength="4" placeholder="CÓDIGO" aria-label="Código de sala" autocomplete="off">
+      <button id="join" class="quiet" disabled>Unirme</button>
+    </div>
+  </div>
+  <div id="msg" role="status"></div>
+</section>
+
+<!-- Esperando rival -->
+<section id="waiting" class="screen panel">
+  <h1>Esperando rival</h1>
+  <div id="roomcode" class="display code"></div>
+  <p>Pasale el código o este link:</p>
+  <p id="link"></p>
+  <div class="row"><button id="copy" class="quiet">Copiar link</button></div>
+</section>
+
+<!-- Cinemática y nombres -->
+<section id="stage" class="screen">
+  <i class="bar t"></i><i class="bar b"></i>
+  <button id="skip" class="quiet">Saltar ▶</button>
+  <div id="tag0" class="nametag"></div>
+  <div id="tag1" class="nametag"></div>
+  <div id="namecard" hidden>
+    <h2 class="display">¿Cómo te llamás?</h2>
+    <div class="row">
+      <input id="myname" maxlength="14" placeholder="TU NOMBRE" aria-label="Tu nombre" autocomplete="off">
+      <button id="ready">¡Listo!</button>
+    </div>
+    <p id="rivalstate">Rival escribiendo…</p>
+  </div>
+</section>
+
+<!-- Partida -->
+<section id="game" class="screen">
+  <button id="mute" class="quiet">Sonido: sí</button>
+  <div id="hud">
+    <div><div class="who" id="n-you">Vos</div><div id="s-you" class="display score">0</div></div>
+    <div id="timer" class="display">20</div>
+    <div><div class="who" id="n-rival">Rival</div><div id="s-rival" class="display score">0</div></div>
+  </div>
+  <div id="big" class="display"></div>
+  <div id="dials">
+    <canvas id="you" aria-label="Tu dial"></canvas>
+    <canvas id="rival" aria-label="Dial del rival"></canvas>
+  </div>
+  <p id="hint">Click o barra espaciadora · C cambia la cámara · F pantalla completa · M silencia</p>
+  <div id="end" hidden>
+    <p id="result" class="display"></p>
+    <button id="rematch">Revancha</button>
+    <button id="tomenu" class="quiet">Volver al menú</button>
+  </div>
+</section>
+
+<script src="/vendor/three.min.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const SCREENS = ['lobby', 'waiting', 'stage', 'game'];
+const send = obj => ws && ws.readyState === 1 && ws.send(JSON.stringify(obj));
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+function show(name) {
+  SCREENS.forEach(s => $(s).classList.toggle('on', s === name));
+  document.body.classList.toggle('ingame', name === 'stage' || name === 'game');
+  document.body.classList.toggle('menu', name === 'lobby' || name === 'waiting');
+}
+
+let ws;
+let offset = 0;          // serverNow = Date.now() + offset
+let bestRtt = Infinity;
+let you = -1;
+let names = ['', ''];
+const nameOf = i => names[i] || `Jugador ${i + 1}`;
+function refreshNames() { $('tag0').textContent = nameOf(you); $('tag1').textContent = nameOf(1 - you); }
+let game = null;         // { startAt, endAt, halfWidth, baseSpeed, maxSpeed, state, last, lastAt, ended, lastCount, wentGo }
+let publicOrigin = location.origin;   // si hay túnel de cloudflared, el link para compartir usa esa URL
+const serverNow = () => Date.now() + offset;
+
+// Efectos de la escena: inclinación suavizada y empujón por acierto.
+const fx = { lean: 0, kick: 0, finalTarget: 0 };
+
+// Qué tan rápido van las flechas, de 0 (lento) a 1 (al tope). Maneja temblor y latido.
+function tensionOf() {
+  if (!game || game.ended) return 0;
+  const a = game.state.arrows;
+  const avg = (a[0].speed + a[1].speed) / 2;
+  return clamp((avg - game.baseSpeed) / (game.maxSpeed - game.baseSpeed), 0, 1);
+}
+
+// ---------- Sonido: todo sintetizado con WebAudio, sin archivos ----------
+function createSfx(ac, out) {
+  const now = () => ac.currentTime;
+  let noiseBuf = null;
+  const noiseSource = () => {
+    if (!noiseBuf) {
+      noiseBuf = ac.createBuffer(1, ac.sampleRate, ac.sampleRate);
+      const d = noiseBuf.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    }
+    const src = ac.createBufferSource();
+    src.buffer = noiseBuf;
+    return src;
+  };
+
+  function tone({ type = 'sine', f0, f1 = f0, dur = 0.2, vol = 0.3, delay = 0, filter = 0 }) {
+    const t = now() + delay;
+    const o = ac.createOscillator();
+    o.type = type;
+    o.frequency.setValueAtTime(f0, t);
+    if (f1 !== f0) o.frequency.exponentialRampToValueAtTime(Math.max(1, f1), t + dur);
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol, t + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    let node = o;
+    if (filter) {
+      const f = ac.createBiquadFilter();
+      f.type = 'lowpass';
+      f.frequency.value = filter;
+      o.connect(f);
+      node = f;
+    }
+    node.connect(g);
+    g.connect(out);
+    o.start(t);
+    o.stop(t + dur + 0.02);
+  }
+
+  function burst({ dur = 0.1, vol = 0.3, freq = 1000, q = 1, type = 'lowpass', delay = 0 }) {
+    const t = now() + delay;
+    const s = noiseSource();
+    const f = ac.createBiquadFilter();
+    f.type = type;
+    f.frequency.value = freq;
+    f.Q.value = q;
+    const g = ac.createGain();
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    s.connect(f);
+    f.connect(g);
+    g.connect(out);
+    s.start(t);
+    s.stop(t + dur + 0.02);
+  }
+
+  return {
+    tick() { tone({ type: 'triangle', f0: 880, dur: 0.08, vol: 0.2 }); },
+    go() {
+      tone({ f0: 110, f1: 40, dur: 0.35, vol: 0.8 });
+      tone({ type: 'triangle', f0: 660, f1: 990, dur: 0.18, vol: 0.25 });
+      burst({ dur: 0.15, vol: 0.4, freq: 800 });
+    },
+    // El agudo sube con cada acierto: se siente que la pulseada se pone más tensa.
+    hit(n = 0) {
+      const k = Math.min(n, 12);
+      tone({ f0: 170, f1: 45, dur: 0.2, vol: 0.8 });
+      burst({ dur: 0.1, vol: 0.45, freq: 1200 });
+      tone({ type: 'triangle', f0: 520 + k * 45, dur: 0.07, vol: 0.18 });
+    },
+    miss() {
+      tone({ type: 'sawtooth', f0: 170, f1: 70, dur: 0.28, vol: 0.28, filter: 700 });
+      burst({ dur: 0.12, vol: 0.18, freq: 350, q: 2, type: 'bandpass' });
+    },
+    rivalHit() {
+      tone({ f0: 130, f1: 50, dur: 0.16, vol: 0.3 });
+      burst({ dur: 0.07, vol: 0.12, freq: 700 });
+    },
+    beat() {
+      tone({ f0: 75, f1: 42, dur: 0.14, vol: 0.55 });
+      tone({ f0: 68, f1: 40, dur: 0.12, vol: 0.3, delay: 0.17 });
+    },
+    end(result) {
+      tone({ f0: 100, f1: 28, dur: 0.5, vol: 0.9, delay: 0.35 });
+      burst({ dur: 0.25, vol: 0.5, freq: 600, delay: 0.35 });
+      if (result === 'win') {
+        [392, 494, 587, 784].forEach((f, i) => tone({ type: 'triangle', f0: f, dur: 0.35, vol: 0.22, delay: 0.7 + i * 0.13 }));
+      } else if (result === 'lose') {
+        tone({ type: 'sawtooth', f0: 196, f1: 98, dur: 0.9, vol: 0.22, delay: 0.7, filter: 500 });
+      } else {
+        tone({ type: 'triangle', f0: 330, dur: 0.3, vol: 0.2, delay: 0.7 });
+        tone({ type: 'triangle', f0: 330, dur: 0.3, vol: 0.2, delay: 0.95 });
+      }
+    },
+    // Zumbido grave de fondo. Devuelve la función para apagarlo.
+    drone() {
+      const t = now();
+      const g = ac.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.07, t + 1.5);
+      const f = ac.createBiquadFilter();
+      f.type = 'lowpass';
+      f.frequency.value = 200;
+      const o1 = ac.createOscillator();
+      const o2 = ac.createOscillator();
+      o1.type = o2.type = 'sawtooth';
+      o1.frequency.value = 55;
+      o2.frequency.value = 55.8;
+      o1.connect(f);
+      o2.connect(f);
+      f.connect(g);
+      g.connect(out);
+      o1.start(t);
+      o2.start(t);
+      return () => {
+        const e = now();
+        g.gain.cancelScheduledValues(e);
+        g.gain.setValueAtTime(Math.max(0.0001, g.gain.value), e);
+        g.gain.exponentialRampToValueAtTime(0.0001, e + 0.6);
+        o1.stop(e + 0.7);
+        o2.stop(e + 0.7);
+      };
+    }
+  };
+}
+
+const audio = { ac: null, master: null, sfx: null, muted: false, stopDrone: null, nextBeat: 0 };
+try { audio.muted = localStorage.getItem('pulseada-muted') === '1'; } catch {}
+
+function unlockAudio() {
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return;
+  if (!audio.ac) {
+    audio.ac = new AC();
+    audio.master = audio.ac.createGain();
+    audio.master.gain.value = audio.muted ? 0 : 0.6;
+    audio.master.connect(audio.ac.destination);
+    audio.sfx = createSfx(audio.ac, audio.master);
+    if (game && !game.ended) startDrone();
+  }
+  if (audio.ac.state === 'suspended') audio.ac.resume();
+}
+const play = (name, ...args) => { if (audio.sfx) audio.sfx[name](...args); };
+function startDrone() { if (audio.sfx && !audio.stopDrone) audio.stopDrone = audio.sfx.drone(); }
+function stopDrone() { if (audio.stopDrone) { audio.stopDrone(); audio.stopDrone = null; } }
+function setMuted(m) {
+  audio.muted = m;
+  if (audio.master) audio.master.gain.value = m ? 0 : 0.6;
+  $('mute').textContent = m ? 'Sonido: no' : 'Sonido: sí';
+  try { localStorage.setItem('pulseada-muted', m ? '1' : '0'); } catch {}
+}
+setMuted(audio.muted);
+$('mute').onclick = () => setMuted(!audio.muted);
+
+// El navegador solo deja sonar el audio después de un gesto del usuario.
+addEventListener('pointerdown', unlockAudio);
+addEventListener('keydown', unlockAudio);
+
+// ---------- Conexión ----------
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}`);
+
+  ws.onopen = () => {
+    syncClock();
+    $('create').disabled = false;
+    $('join').disabled = false;
+    const auto = new URLSearchParams(location.search).get('sala');
+    if (auto) send({ type: 'join', code: auto });
+  };
+
+  ws.onmessage = e => onMessage(JSON.parse(e.data));
+
+  ws.onclose = () => {
+    game = null;
+    stopDrone();
+    $('create').disabled = true;
+    $('join').disabled = true;
+    show('lobby');
+    if (S3) S3.setMode('menu');
+    $('msg').textContent = 'Se perdió la conexión. Recargá la página para volver a entrar.';
+  };
+}
+
+// Estima el desfasaje de reloj con el servidor usando el ping de menor latencia.
+function syncClock() {
+  let n = 0;
+  const iv = setInterval(() => {
+    send({ type: 'ping', c: Date.now() });
+    if (++n >= 8) clearInterval(iv);
+  }, 120);
+}
+
+function onMessage(m) {
+  switch (m.type) {
+    case 'pong': {
+      const now = Date.now();
+      const rtt = now - m.c;
+      if (rtt < bestRtt) {
+        bestRtt = rtt;
+        offset = m.s + rtt / 2 - now;
+      }
+      break;
+    }
+    case 'created':
+      $('roomcode').textContent = m.code;
+      $('link').textContent = `${publicOrigin}/?sala=${m.code}`;
+      show('waiting');
+      break;
+    case 'error':
+      $('msg').textContent = m.message;
+      break;
+    case 'matched':
+      you = m.you;
+      names = ['', ''];
+      game = null;
+      $('myname').value = '';
+      $('myname').disabled = false;
+      $('ready').disabled = false;
+      $('ready').textContent = '¡Listo!';
+      $('namecard').hidden = true;
+      $('skip').hidden = false;
+      $('stage').classList.remove('names');
+      $('rivalstate').textContent = 'Rival escribiendo…';
+      refreshNames();
+      $('fade').classList.add('on');
+      setTimeout(() => {
+        show('stage');
+        if (S3) S3.setMode('intro'); else if (!$('namecard').hidden) {} else { $('stage').classList.add('names'); $('namecard').hidden = false; }
+        $('fade').classList.remove('on');
+      }, 380);
+      break;
+    case 'names':
+      names = m.names;
+      refreshNames();
+      $('rivalstate').textContent = m.ready[1 - you] ? 'Rival listo ✓' : 'Rival escribiendo…';
+      break;
+    case 'start':
+      you = m.you;
+      names = m.names || names;
+      refreshNames();
+      $('n-you').textContent = nameOf(you);
+      $('n-rival').textContent = nameOf(1 - you);
+      game = {
+        startAt: m.startAt, endAt: m.endAt, halfWidth: m.halfWidth,
+        baseSpeed: m.baseSpeed, maxSpeed: m.maxSpeed,
+        state: m.state, last: null, lastAt: 0, ended: false, lastCount: 0, wentGo: false
+      };
+      fx.lean = 0; fx.kick = 0; fx.finalTarget = 0;
+      audio.nextBeat = 0;
+      bestRtt = Infinity;   // vuelve a medir la latencia durante la cuenta regresiva
+      syncClock();
+      $('end').hidden = true;
+      $('hint').style.visibility = 'visible';
+      $('rematch').disabled = false;
+      $('rematch').textContent = 'Revancha';
+      $('msg').textContent = '';
+      show('game');
+      if (S3) S3.setMode('fight');
+      layout();
+      startDrone();
+      break;
+    case 'state':
+      if (!game) break;
+      game.state = m.state;
+      game.last = m.last;
+      game.lastAt = Date.now();
+      if (m.last.hit) fx.kick += m.last.player === you ? 0.08 : -0.08;
+      if (m.last.player === you) play(m.last.hit ? 'hit' : 'miss', m.state.scores[you]);
+      else if (m.last.hit) play('rivalHit');
+      break;
+    case 'end':
+      if (!game) break;
+      game.ended = true;
+      game.state.scores = m.scores;
+      fx.finalTarget = m.winner === -1 ? 0 : m.winner === you ? 1 : -1;
+      $('result').textContent = m.winner === -1 ? 'Empate' : nameOf(m.winner) + (m.winner === you ? ' — ¡ganaste!' : ' gana la pulseada');
+      $('end').hidden = false;
+      $('hint').style.visibility = 'hidden';
+      stopDrone();
+      play('end', m.winner === -1 ? 'tie' : m.winner === you ? 'win' : 'lose');
+      break;
+    case 'opponent_left':
+      game = null;
+      stopDrone();
+      show('lobby');
+      if (S3) S3.setMode('menu');
+      $('msg').textContent = 'El rival se fue de la sala.';
+      break;
+  }
+}
+
+// ---------- Interfaz ----------
+$('create').onclick = () => send({ type: 'create' });
+$('join').onclick = () => send({ type: 'join', code: $('code').value });
+$('code').addEventListener('keydown', e => { if (e.key === 'Enter') $('join').click(); });
+$('copy').onclick = () => navigator.clipboard.writeText($('link').textContent);
+$('rematch').onclick = () => {
+  send({ type: 'rematch' });
+  $('rematch').disabled = true;
+  $('rematch').textContent = 'Esperando al rival…';
+};
+
+function toMenu() {
+  send({ type: 'leave' });
+  game = null;
+  stopDrone();
+  history.replaceState(null, '', location.pathname);
+  $('msg').textContent = '';
+  $('code').value = '';
+  $('end').hidden = true;
+  show('lobby');
+  if (S3) S3.setMode('menu');
+}
+$('tomenu').onclick = toMenu;
+
+// Pantalla completa (botón o tecla F)
+const canFs = !!document.documentElement.requestFullscreen;
+function toggleFs() {
+  if (!canFs) return;
+  if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen().catch(() => {});
+}
+$('fs').hidden = !canFs;
+$('fs').onclick = toggleFs;
+document.addEventListener('fullscreenchange', () => {
+  $('fs').textContent = document.fullscreenElement ? 'Salir de pantalla completa' : 'Pantalla completa';
+});
+addEventListener('keydown', e => {
+  if (e.code === 'KeyF' && !e.ctrlKey && !e.metaKey && !/INPUT|TEXTAREA/.test(e.target.tagName)) toggleFs();
+});
+
+function pulse() {
+  if (!game || game.ended) return;
+  const t = serverNow();
+  if (t < game.startAt || t > game.endAt) return;
+  send({ type: 'click', t });
+}
+addEventListener('pointerdown', e => {
+  if (game && !game.ended && !e.target.closest('button')) pulse();
+});
+addEventListener('keydown', e => {
+  if (e.code === 'Space' && game && !game.ended) {
+    e.preventDefault();
+    if (!e.repeat) pulse();
+  }
+  if (game && !e.repeat) {
+    if (e.code === 'KeyM') setMuted(!audio.muted);
+    if (e.code === 'KeyC' && S3) S3.toggleView();
+  }
+});
+
+// ---------- Diales 2D (el timing se juega acá, la escena 3D es ambiente) ----------
+const ctxs = {};
+function setupCanvas(canvas, size) {
+  const dpr = window.devicePixelRatio || 1;
+  canvas.style.width = size + 'px';
+  canvas.style.height = size + 'px';
+  canvas.width = size * dpr;
+  canvas.height = size * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { ctx, size };
+}
+
+function layout() {
+  const big = Math.round(Math.max(170, Math.min(300, innerWidth * 0.4, innerHeight * 0.36)));
+  ctxs.you = setupCanvas($('you'), big);
+  ctxs.rival = setupCanvas($('rival'), Math.round(big * 0.5));
+  if (S3) S3.resize();
+}
+addEventListener('resize', () => { if (S3) S3.resize(); if (game) layout(); });
+
+const arrowRaw = (a, t) => a.angle0 + (a.speed * (Math.max(t, a.t0) - a.t0)) / 1000;
+
+function drawDial({ ctx, size: S }, arrow, zone, hw, t, flash) {
+  const c = S / 2;
+  const R = S / 2 - 12;
+  const top = -Math.PI / 2;
+  ctx.clearRect(0, 0, S, S);
+
+  ctx.beginPath();
+  ctx.arc(c, c, R, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(43, 41, 37, 0.92)';
+  ctx.fill();
+  ctx.lineWidth = S * 0.03;
+  ctx.strokeStyle = flash || '#6b665a';
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.arc(c, c, R, top + zone - hw, top + zone + hw);
+  ctx.lineWidth = S * 0.07;
+  ctx.strokeStyle = '#e0b43c';
+  ctx.stroke();
+
+  ctx.save();
+  ctx.translate(c, c);
+  ctx.rotate(top + arrowRaw(arrow, t));
+  ctx.fillStyle = '#ece4cf';
+  ctx.fillRect(0, -S * 0.01, R * 0.72, S * 0.02);
+  ctx.beginPath();
+  ctx.moveTo(R * 0.95, 0);
+  ctx.lineTo(R * 0.7, -S * 0.045);
+  ctx.lineTo(R * 0.7, S * 0.045);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+
+  ctx.beginPath();
+  ctx.arc(c, c, S * 0.035, 0, Math.PI * 2);
+  ctx.fillStyle = '#ece4cf';
+  ctx.fill();
+}
+
+// ---------- Escena 3D low poly ----------
+// Coordenadas: tablero de la mesa en y = 0.9, vos en z positivo, rival en z negativo.
+// Dos cámaras: primera persona (por defecto) y una vista desde atrás (tecla C).
+let S3 = null;
+
+// Los dos personajes, inspirados en las fichas de concepto. El jugador 0 usa el primero, el 1 el segundo.
+const STYLES = [
+  { // gorra negra, campera verde oliva, remera negra, cargo azul oscuro
+    skin: 0xd99a68, skinDark: 0xb3764d, hair: 0x2a1f18, beard: 0x6b4a34,
+    jacket: 0x3f4235, cuff: 0x4a4d3e, hood: 0x8c8c88, tee: 0x1d1c1e,
+    pants: 0x232738, shoe: 0x2b2b2e, sole: 0xe8e4da, capFront: 0x2a2a2c, capBack: 0x2a2a2c
+  },
+  { // gorra roja y blanca, campera negra, remera gris, jean azul
+    skin: 0xdfa070, skinDark: 0xb87a50, hair: 0x2b2018, beard: 0x86664a,
+    jacket: 0x2b2a33, cuff: 0x9a9a9e, hood: 0x9a9a9e, tee: 0xcfc9c2,
+    pants: 0x3b4a78, shoe: 0xe9e4de, sole: 0xb83a3a, capFront: 0xb83a3a, capBack: 0xd8d0c6
+  }
+];
+
+// Expresiones del rival (y las tuyas en la vista 3/4), como en la hoja de expresiones.
+const EXPRESSIONS = {
+  normal:    { brow: 0.15, browY: 0,     smirk: 0.0,  teeth: false, open: false, eye: 1 },
+  smug:      { brow: 0.22, browY: 0,     smirk: 0.22, teeth: true,  open: false, eye: 0.85 },
+  angry:     { brow: 0.5,  browY: -0.004, smirk: -0.1, teeth: true,  open: false, eye: 0.8 },
+  surprised: { brow: -0.08, browY: 0.03, smirk: 0,    teeth: false, open: true,  eye: 1.5 }
+};
+
+function initScene() {
+  const canvas = $('scene');
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+  const scene = new THREE.Scene();
+  const BG = 0x1b1e19;
+  scene.background = new THREE.Color(BG);
+  scene.fog = new THREE.Fog(BG, 6, 14);
+
+  const camera = new THREE.PerspectiveCamera(62, 1, 0.1, 40);
+  const VIEWS = {
+    fp: { pos: new THREE.Vector3(0.1, 1.85, 1.45), look: new THREE.Vector3(0, 1.3, -0.3), fov: 62, firstPerson: true },
+    tp: { pos: new THREE.Vector3(1.1, 2.8, 3.3), look: new THREE.Vector3(0, 1.1, -0.2), fov: 44, firstPerson: false }
+  };
+  let view = 'fp';
+
+  // ----- Ayudas para armar geometría low poly -----
+  let parent = scene;   // todo lo que se crea se agrega acá
+  const matCache = new Map();
+  const mat = (color, extra) => {
+    if (extra) return new THREE.MeshStandardMaterial(Object.assign({ color, flatShading: true, roughness: 0.9, metalness: 0 }, extra));
+    if (!matCache.has(color)) matCache.set(color, new THREE.MeshStandardMaterial({ color, flatShading: true, roughness: 0.9, metalness: 0 }));
+    return matCache.get(color);
+  };
+  const add = (m, x, y, z) => {
+    m.position.set(x, y, z);
+    m.castShadow = true;
+    m.receiveShadow = true;
+    parent.add(m);
+    return m;
+  };
+  const box = (w, h, d, color, x, y, z) => add(new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat(color)), x, y, z);
+  const ico = (r, color, x, y, z, detail = 0) => add(new THREE.Mesh(new THREE.IcosahedronGeometry(r, detail), mat(color)), x, y, z);
+  // Pieza de revolución de 7 lados con perfil [y (0..1), radio]: sirve para brazos con músculo.
+  const lathe = (profile, color) => {
+    const pts = profile.map(([y, r]) => new THREE.Vector2(r, y));
+    return add(new THREE.Mesh(new THREE.LatheGeometry(pts, 7), mat(color)), 0, 0, 0);
+  };
+
+  const UP = new THREE.Vector3(0, 1, 0);
+  const tmp = new THREE.Vector3();
+  const place = (m, a, b) => {   // estira una pieza (largo 1 en Y) entre dos puntos
+    tmp.subVectors(b, a);
+    const len = tmp.length();
+    if (len < 1e-4) return;
+    m.position.copy(a);
+    m.scale.set(1, len, 1);
+    m.quaternion.setFromUnitVectors(UP, tmp.normalize());
+  };
+  const bx = new THREE.Vector3(), by = new THREE.Vector3(), bz = new THREE.Vector3(), bm = new THREE.Matrix4();
+  // Orienta un objeto: eje Y hacia `y`, eje Z lo más cerca posible de `zHint`. Deja el eje Z resultante en bz.
+  const orient = (obj, y, zHint) => {
+    by.copy(y).normalize();
+    bz.copy(zHint).addScaledVector(by, -zHint.dot(by)).normalize();
+    bx.crossVectors(by, bz);
+    bm.makeBasis(bx, by, bz);
+    obj.quaternion.setFromRotationMatrix(bm);
+  };
+
+  // Perfiles de los brazos: bíceps marcado, antebrazo grueso que afina hacia la muñeca.
+  const UPPER = [[0, 0], [0, 0.1], [0.3, 0.118], [0.7, 0.102], [1, 0.088], [1, 0]];
+  const CUFF = [[0.5, 0], [0.5, 0.112], [0.78, 0.126], [0.84, 0.134], [1, 0.138], [1, 0]];
+  const FORE = [[0, 0], [0, 0.084], [0.2, 0.096], [0.55, 0.075], [1, 0.054], [1, 0]];
+  const S = 1.5;            // escala de las manos
+  const FORE_LEN = 0.455;   // codo → muñeca
+  const HAND_LEN = 0.165;   // muñeca → centro del agarre
+  const REACH = FORE_LEN + HAND_LEN;
+
+  // Mano para el agarre: Y va por el antebrazo, Z mira a la otra mano. Los dedos se enganchan por detrás de la mano rival.
+  function makeHand(st, fingerShift) {
+    const h = new THREE.Group();
+    const prev = parent;
+    parent = h;
+    box(0.095 * S, 0.1 * S, 0.05 * S, st.skin, 0, 0.05 * S, 0);                       // palma
+    for (let i = 0; i < 4; i++) {
+      const x = (i - 1.5) * 0.024 * S + fingerShift;
+      box(0.021 * S, 0.022 * S, 0.05 * S, st.skin, x, 0.108 * S, 0.03 * S);           // falange 1
+      box(0.02 * S, 0.045 * S, 0.02 * S, st.skin, x, 0.088 * S, 0.065 * S);           // falange 2, dobla hacia abajo
+    }
+    box(0.026 * S, 0.075 * S, 0.026 * S, st.skinDark, 0.062 * S, 0.065 * S, 0.04 * S); // pulgar por arriba
+    parent = prev;
+    return h;
+  }
+
+  // Puño cerrado, para el brazo libre apoyado en la mesa.
+  function makeFist(st) {
+    const h = new THREE.Group();
+    const prev = parent;
+    parent = h;
+    box(0.1 * S, 0.09 * S, 0.085 * S, st.skin, 0, 0.045 * S, 0);
+    for (let i = 0; i < 4; i++) box(0.022 * S, 0.05 * S, 0.075 * S, st.skin, (i - 1.5) * 0.024 * S, 0.11 * S, 0);
+    box(0.03 * S, 0.08 * S, 0.03 * S, st.skinDark, 0.058 * S, 0.075 * S, 0.045 * S);
+    parent = prev;
+    return h;
+  }
+
+  // Brazo apoyado, con la manga arremangada hasta el codo.
+  function restingArm(st, shoulder, elbow, dir) {
+    const up = lathe(UPPER, st.jacket), cu = lathe(CUFF, st.cuff), fo = lathe(FORE, st.skin);
+    place(up, shoulder, elbow);
+    place(cu, shoulder, elbow);
+    const wrist = elbow.clone().addScaledVector(dir.clone().normalize(), FORE_LEN);
+    place(fo, elbow, wrist);
+    const f = makeFist(st);
+    parent.add(f);
+    f.position.copy(wrist);
+    orient(f, dir, UP);
+    return up;
+  }
+
+  // ----- Cuarto, mesa y luces (no dependen de quién juega) -----
+  scene.add(new THREE.HemisphereLight(0x9aaa95, 0x20201c, 0.75));
+  const faceLight = new THREE.PointLight(0xffe6cc, 0.55, 6);
+  faceLight.position.set(0.3, 2.5, 1.3);
+  scene.add(faceLight);
+  const fill = new THREE.DirectionalLight(0xb8c4aa, 0.45);
+  fill.position.set(3, 3, 2);
+  scene.add(fill);
+  const spot = new THREE.SpotLight(0xffe2b0, 1.15, 12, Math.PI / 3.2, 0.6, 1);
+  spot.position.set(0, 3.3, 0);
+  spot.target.position.set(0, 0.9, 0);
+  spot.castShadow = true;
+  spot.shadow.mapSize.set(1024, 1024);
+  spot.shadow.bias = -0.0005;
+  scene.add(spot, spot.target);
+
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(20, 20), mat(0x34362f));
+  floor.rotation.x = -Math.PI / 2;
+  floor.receiveShadow = true;
+  scene.add(floor);
+  box(20, 5, 0.3, 0x3b4236, 0, 2.5, -5);
+  box(0.3, 5, 20, 0x434a3b, -5, 2.5, 0);
+  box(0.3, 5, 20, 0x434a3b, 5, 2.5, 0);
+  box(0.9, 0.9, 0.9, 0x4a3f30, -3.4, 0.45, 1.7);
+  box(0.6, 0.6, 0.6, 0x453b2d, -3.7, 0.3, 0.7).rotation.y = 0.5;
+  box(0.8, 0.7, 0.8, 0x4a3f30, -3.2, 0.35, -2.4).rotation.y = -0.3;
+  box(0.8, 0.8, 0.8, 0x453b2d, 3.3, 0.4, -3.2).rotation.y = 0.4;
+
+  const cord = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 1.4, 4), mat(0x111111));
+  cord.position.set(0, 4.0, 0);
+  scene.add(cord);
+  const shade = new THREE.Mesh(new THREE.ConeGeometry(0.4, 0.3, 6), mat(0x6b665a, { emissive: 0xffd9a0, emissiveIntensity: 0.35 }));
+  shade.position.set(0, 3.3, 0);
+  scene.add(shade);
+  const bulb = new THREE.Mesh(new THREE.IcosahedronGeometry(0.09, 0), new THREE.MeshBasicMaterial({ color: 0xfff0cc }));
+  bulb.position.set(0, 3.12, 0);
+  scene.add(bulb);
+
+  // Mesa con las almohadillas laterales: las manos caen hacia los costados, no hacia los jugadores.
+  box(2.4, 0.1, 1.2, 0x5a4636, 0, 0.85, 0);
+  [[-1, -1], [-1, 1], [1, -1], [1, 1]].forEach(([sx, sz]) => box(0.12, 0.85, 0.12, 0x3f3226, sx * 1.05, 0.425, sz * 0.5));
+  box(0.36, 0.014, 0.4, 0x8a2f25, 0.88, 0.907, 0);
+  box(0.36, 0.014, 0.4, 0x8a2f25, -0.88, 0.907, 0);
+  box(0.4, 0.05, 0.44, 0x4a1c17, 0.88, 0.89, 0);
+  box(0.4, 0.05, 0.44, 0x4a1c17, -0.88, 0.89, 0);
+
+  // ----- Personajes, silla, cinemática y poses -----
+  let people = new THREE.Group();
+  scene.add(people);
+  let rig = null, builtFor = -1;
+  const M = { name: 'menu', t: 99, joinAt: 0, snap: true };   // modo de la escena: menu | intro | names | fight
+  const HIP0 = 0.75, TAU2 = Math.PI * 2;
+  const ease = u => u * u * (3 - 2 * u);
+  const nz = (a, b, u) => a + (b - a) * u;
+  const rnd = () => Math.random() - 0.5;
+
+  function buildChair(sgn) {
+    const c = new THREE.Group();
+    c.position.set(0.1 * sgn, 0, 0.85 * sgn);
+    c.rotation.y = sgn > 0 ? Math.PI : 0;
+    people.add(c);
+    const prev = parent;
+    parent = c;
+    box(0.6, 0.08, 0.55, 0x2a2824, 0, 0.6, -0.1);
+    box(0.6, 0.55, 0.07, 0x2a2824, 0, 0.92, -0.36);
+    [[-1, -1], [-1, 1], [1, -1], [1, 1]].forEach(([x, z]) => box(0.06, 0.58, 0.06, 0x1d1c1a, x * 0.26, 0.29, -0.1 + z * 0.22));
+    parent = prev;
+    return c;
+  }
+
+  // Cuerpo con piernas articuladas (cadera y rodilla) para caminar y sentarse. Mira a +z en su propio sistema.
+  function buildBody(st, sgn) {
+    const B = { st, sgn, ry: sgn > 0 ? Math.PI : 0, wk: 0 };
+    const prev = parent;
+    const g = B.g = new THREE.Group();
+    people.add(g);
+    const hips = B.hips = new THREE.Group();
+    g.add(hips);
+    parent = hips;
+    B.legs = [-0.15, 0.15].map(x => {
+      const th = new THREE.Group();
+      th.position.set(x, -0.07, 0);
+      hips.add(th);
+      parent = th;
+      box(0.27, 0.6, 0.27, st.pants, 0, -0.3, 0);                                   // muslo
+      const sh = new THREE.Group();
+      sh.position.set(0, -0.6, 0);
+      th.add(sh);
+      parent = sh;
+      box(0.22, 0.56, 0.22, st.pants, 0, -0.28, 0);                                 // pantorrilla
+      const ft = new THREE.Group();                                                 // tobillo
+      ft.position.set(0, -0.56, 0);
+      sh.add(ft);
+      parent = ft;
+      box(0.24, 0.12, 0.36, st.shoe, 0, -0.04, 0.07);                               // zapatilla
+      box(0.25, 0.04, 0.37, st.sole, 0, -0.1, 0.07);                                // suela
+      return { th, sh, ft };
+    });
+
+    // Del torso para arriba: pivota en la cadera y se inclina hacia la mesa.
+    const pivot = B.pivot = new THREE.Group();
+    hips.add(pivot);
+    const inner = new THREE.Group();
+    inner.position.y = -HIP0;
+    pivot.add(inner);
+    parent = inner;
+    const torso = add(new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.33, 0.9, 8), mat(st.jacket)), 0, 1.12, 0);
+    torso.scale.z = 0.58;
+    box(0.62, 0.2, 0.38, st.pants, 0, 0.7, 0);                                      // cintura (tapa la unión con las piernas)
+    ico(0.15, st.jacket, 0.42, 1.5, 0);                                             // hombros
+    ico(0.15, st.jacket, -0.42, 1.5, 0);
+    box(0.2, 0.46, 0.02, st.tee, 0, 1.2, 0.222);                                    // remera
+    box(0.012, 0.5, 0.02, 0x141414, 0.1, 1.17, 0.232);                              // cierre de la campera
+    const hood = add(new THREE.Mesh(new THREE.TorusGeometry(0.2, 0.075, 5, 8), mat(st.hood)), 0, 1.6, -0.02);
+    hood.rotation.x = Math.PI / 2;
+    ico(0.17, st.hood, 0, 1.56, -0.13).scale.set(1.2, 1, 0.8);                      // capucha amontonada
+    add(new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.085, 0.14, 6), mat(st.skin)), 0, 1.68, 0);   // cuello
+    B.shR = new THREE.Object3D();                                                   // anclas de los hombros: el brazo derecho pulsea
+    B.shR.position.set(-0.42, 1.5, 0);
+    inner.add(B.shR);
+    B.shL = new THREE.Object3D();
+    B.shL.position.set(0.42, 1.5, 0);
+    inner.add(B.shL);
+
+    // Cabeza (grupo que gira sobre el cuello)
+    const head = B.head = new THREE.Group();
+    head.position.set(0, 1.72, 0);
+    inner.add(head);
+    parent = head;
+    ico(0.22, st.skin, 0, 0.16, 0.02, 1).scale.set(0.95, 1.12, 1);
+    ico(0.045, st.skin, 0.21, 0.16, 0);                                             // orejas
+    ico(0.045, st.skin, -0.21, 0.16, 0);
+    const nose = add(new THREE.Mesh(new THREE.ConeGeometry(0.04, 0.09, 4), mat(st.skinDark)), 0, 0.135, 0.215);
+    nose.rotation.x = Math.PI / 2;
+    ico(0.2, st.beard, 0, 0.06, 0.045, 1).scale.set(0.97, 0.66, 1.0);               // barba
+    box(0.03, 0.1, 0.06, st.hair, 0.2, 0.18, 0.04);                                 // patillas
+    box(0.03, 0.1, 0.06, st.hair, -0.2, 0.18, 0.04);
+    ico(0.235, st.hair, 0, 0.21, -0.04, 1).scale.set(1.0, 0.82, 1.05);              // pelo
+    const wl = box(0.055, 0.03, 0.02, 0xece6d8, -0.08, 0.165, 0.205);
+    const wr = box(0.055, 0.03, 0.02, 0xece6d8, 0.08, 0.165, 0.205);
+    const pl = box(0.026, 0.026, 0.015, 0x1c120c, -0.08, 0.165, 0.216);
+    const pr = box(0.026, 0.026, 0.015, 0x1c120c, 0.08, 0.165, 0.216);
+    const bl = box(0.095, 0.024, 0.03, st.hair, -0.08, 0.21, 0.21);
+    const br = box(0.095, 0.024, 0.03, st.hair, 0.08, 0.21, 0.21);
+    const mouth = box(0.075, 0.014, 0.02, 0x2a1410, 0, 0.05, 0.252);
+    const teeth = box(0.07, 0.028, 0.014, 0xf2efe6, 0, 0.042, 0.254);
+    const open = box(0.05, 0.055, 0.02, 0x1a0a08, 0, 0.035, 0.252);
+    // Gorra: copa en dos mitades (frente y atrás) y visera angosta hacia abajo, que sombrea los ojos.
+    const crown = (ps, c) => add(new THREE.Mesh(new THREE.SphereGeometry(0.245, 8, 5, ps, Math.PI, 0, Math.PI / 2), mat(c)), 0, 0.245, 0).scale.set(1, 0.82, 1.05);
+    crown(0, st.capFront);
+    crown(Math.PI, st.capBack);
+    box(0.3, 0.022, 0.2, st.capFront, 0, 0.252, 0.25).rotation.x = 0.22;
+    B.face = { name: '', browL: bl, browR: br, mouth, teeth, open, eyes: [wl, wr, pl, pr] };
+    parent = prev;
+    return B;
+  }
+
+  function setFace(f, name) {
+    if (f.name === name) return;
+    f.name = name;
+    const e = f.e = EXPRESSIONS[name];
+    f.browL.rotation.z = -e.brow;
+    f.browR.rotation.z = e.brow;
+    f.browL.position.y = f.browR.position.y = 0.21 + e.browY;
+    f.mouth.rotation.z = e.smirk;
+    f.mouth.visible = !e.open;
+    f.teeth.visible = e.teeth;
+    f.open.visible = e.open;
+  }
+
+  function buildPeople(youIdx) {
+    scene.remove(people);
+    people = new THREE.Group();
+    scene.add(people);
+    parent = people;
+    const me = buildBody(STYLES[youIdx], 1), op = buildBody(STYLES[1 - youIdx], -1);
+    me.chair = buildChair(1);
+    op.chair = buildChair(-1);
+    [me, op].forEach((B, i) => {
+      B.delay = i * 0.5;
+      parent = people;
+      B.arms = [0, 1].map(n => ({
+        upper: lathe(UPPER, B.st.jacket), cuff: lathe(CUFF, B.st.cuff), fore: lathe(FORE, B.st.skin),
+        hand: n === 0 ? makeHand(B.st, i ? 0.012 * S : 0) : makeFist(B.st)   // 0 = brazo que pulsea, 1 = brazo libre
+      }));
+      B.arms.forEach(A => people.add(A.hand));
+      setFace(B.face, 'normal');
+    });
+    rig = { me, op };
+    parent = scene;
+    builtFor = youIdx;
+  }
+
+  // ----- Brazos -----
+  const EY = 0.99, EXM = 0.3, EXO = -0.3, EZ = 0.25;
+  const R = Math.sqrt(REACH * REACH - EZ * EZ);
+  const PHI0 = Math.asin(0.3 / R);
+  const V = () => new THREE.Vector3();
+  const C = V(), Cm = V(), Co = V(), eMe = V(), eOpp = V(), sMe = V(), sOpp = V();
+  const E = V(), G = V(), W = V(), Dv = V(), SH = V(), ES = V(), GS = V(), zH = V(), hangE = V(), hangG = V(), fwd = V();
+  const CEN = new THREE.Vector3(0, EY, 0);
+  const E0m = new THREE.Vector3(0.5, EY, 0.55), E0o = new THREE.Vector3(-0.5, EY, -0.55);        // codos apoyados, listos
+  const G0m = new THREE.Vector3(0.25, 1.24, 0.044), G0o = new THREE.Vector3(-0.25, 1.24, -0.044); // manos arriba, antes de agarrarse
+
+  // De colgando (al caminar) a la pose sentado. Deja codo y agarre en E y G.
+  function blend(B, sh, a, sw, Es, Gs) {
+    fwd.set(Math.sin(B.ry), 0, Math.cos(B.ry));
+    const th = 0.5 * sw, bend = 0.25 + 0.5 * Math.max(0, sw);   // el codo se dobla más cuando el brazo va adelante
+    hangE.set(sh.x, sh.y - 0.5 * Math.cos(th), sh.z).addScaledVector(fwd, 0.5 * Math.sin(th));
+    hangG.copy(hangE).addScaledVector(fwd, 0.45 * Math.sin(th + bend));
+    hangG.y -= 0.45 * Math.cos(th + bend);
+    E.lerpVectors(hangE, Es, a);
+    G.lerpVectors(hangG, Gs, a);
+  }
+
+  // Brazo que pulsea: la mano mira hacia `look`.
+  function poseArm(A, sh, el, grip, look) {
+    Dv.subVectors(grip, el).normalize();
+    W.copy(el).addScaledVector(Dv, FORE_LEN);
+    place(A.upper, sh, el);
+    place(A.cuff, sh, el);
+    place(A.fore, el, W);
+    zH.subVectors(look, el);
+    orient(A.hand, Dv, zH);
+    A.hand.position.copy(W).addScaledVector(bz, -0.025 * S);
+  }
+
+  function readyArm(B, a, sw) {
+    B.shR.getWorldPosition(SH);
+    ES.set(0.5 * B.sgn, EY, 0.55 * B.sgn);
+    GS.set(0.25 * B.sgn, 1.24, 0.044 * B.sgn);
+    blend(B, SH, a, sw, ES, GS);
+    poseArm(B.arms[0], SH, E, G, CEN);
+  }
+
+  const RT = V(), RE = V();
+  function freeArm(B, a, sw) {
+    const A = B.arms[1];
+    B.shL.getWorldPosition(SH);
+    ES.set(-0.53 * B.sgn, EY, 0.62 * B.sgn);
+    GS.set(ES.x + 0.023 * B.sgn, EY, ES.z - 0.455 * B.sgn);
+    blend(B, SH, a, sw, ES, GS);
+    if (B.reach > 0.001) {   // agarra el respaldo de la silla para correrla
+      const c = B.chair.position;
+      RT.set(c.x + 0.25, 1.12, c.z + 0.36 * B.sgn);
+      Dv.subVectors(RT, SH);
+      const d = Math.min(Dv.length(), 0.9);
+      RE.copy(SH).addScaledVector(Dv, 0.5);
+      RE.y -= Math.sqrt(Math.max(0.01, 0.2256 - d * d / 4));
+      E.lerp(RE, B.reach);
+      G.lerp(RT, B.reach);
+    }
+    Dv.subVectors(G, E).normalize();
+    W.copy(E).addScaledVector(Dv, FORE_LEN);
+    place(A.upper, SH, E);
+    place(A.cuff, SH, E);
+    place(A.fore, E, W);
+    orient(A.hand, Dv, UP);
+    A.hand.position.copy(W);
+  }
+
+  // ----- Cinemática: camina hasta la silla, la corre con la mano, se acomoda y se sienta -----
+  const LS = Math.hypot(1.5, 1.6) + Math.hypot(0.15, 1.0), L2 = 0.28 + 0.85;
+  const TA = LS / 1.3, TP = 2.1, T2 = TA + TP, TS = T2 + 1.2;   // llega, pausa (corre la silla), camina al asiento, se sienta
+  function stage(B, dt) {
+    const m = B.sgn, t = M.t - B.delay;
+    const P = [[2.6, 3.6 * m], [1.1, 2.0 * m], [0.95, 1.0 * m], [0.95, 0.72 * m], [0.1 * m, 0.72 * m]];
+    const d = LS * ease(clamp(t / TA, 0, 1)) + L2 * ease(clamp((t - T2) / 1.0, 0, 1));   // arranca y frena suave
+    let rem = d, x = P[0][0], z = P[0][1], hd = 0;
+    for (let i = 0; i < 4; i++) {
+      const dx = P[i + 1][0] - P[i][0], dz = P[i + 1][1] - P[i][1], L = Math.hypot(dx, dz);
+      hd = Math.atan2(dx, dz);
+      if (rem <= L || i === 3) {
+        const u = Math.min(1, rem / L);
+        x = P[i][0] + dx * u;
+        z = P[i][1] + dz * u;
+        break;
+      }
+      rem -= L;
+    }
+    const spd = dt > 0 && B.d0 !== undefined ? Math.min((d - B.d0) / dt, 3) : 0;
+    B.d0 = d;
+    B.ph = (B.ph || 0) + spd * dt * 3.4;
+    const fin = m > 0 ? Math.PI : 0;
+    const tgt = spd > 0.2 ? hd : (t >= T2 + 0.2 ? fin : (t >= TA * 0.9 ? -Math.PI / 2 : hd));   // mira la silla mientras la corre
+    B.ry += ((((tgt - B.ry + Math.PI) % TAU2) + TAU2) % TAU2 - Math.PI) * (1 - Math.exp(-dt * 6));
+    B.wk += (clamp(spd / 1.2, 0, 1) - B.wk) * (1 - Math.exp(-dt * 10));
+    const s = B.s = ease(clamp((t - TS) / 1.5, 0, 1));           // 0 de pie … 1 sentado
+    const ci = ease(clamp((t - TS - 0.2) / 1.1, 0, 1));          // la silla se mete al sentarse
+    const pull = ease(clamp((t - TA - 0.9) / 0.8, 0, 1));        // la silla se corre hacia atrás
+    B.reach = ease(clamp((t - TA - 0.4) / 0.5, 0, 1)) * (1 - ease(clamp((t - TA - 1.8) / 0.3, 0, 1)));
+    const ph = B.ph;
+    B.legs.forEach((L, i) => {
+      const sw = Math.sin(ph + i * Math.PI);
+      L.th.rotation.x = nz(0.5 * sw * B.wk, -Math.PI / 2, s);
+      L.sh.rotation.x = nz(0.7 * Math.max(0, sw) * B.wk, Math.PI / 2, s);
+      L.ft.rotation.x = -(L.th.rotation.x + L.sh.rotation.x) + 0.35 * Math.max(0, sw) * B.wk * (1 - s);   // pie plano y despegue de punta
+    });
+    B.hips.position.x = Math.sin(ph) * 0.02 * B.wk;                    // cambio de peso
+    B.hips.rotation.y = -Math.sin(ph) * 0.1 * B.wk;                    // la pelvis gira para un lado…
+    B.hips.position.y = HIP0 + 0.6 * Math.cos(s * Math.PI / 2) + 0.03 * Math.abs(Math.sin(ph)) * B.wk;
+    B.pivot.rotation.x = nz(0.04, 0.22, s) + 0.22 * Math.sin(Math.PI * s);   // se inclina hacia adelante al bajar
+    B.pivot.rotation.y = Math.sin(ph) * 0.2 * B.wk;                          // …y los hombros para el otro
+    B.pivot.rotation.z = Math.sin(ph) * 0.03 * B.wk;
+    B.g.position.set(x, 0, z + 0.13 * m * s);
+    B.g.rotation.y = B.ry;
+    B.chair.position.z = (0.85 + 0.45 * pull * (1 - ci)) * m;
+    B.g.updateMatrixWorld(true);
+    return { a: ease(clamp((t - TS - 0.5) / 1.1, 0, 1)), sw: Math.sin(ph) * B.wk };
+  }
+
+  // ----- Pulseada: el que pierde pivota sobre su codo; el que gana desliza el suyo por encima -----
+  function fight(dt) {
+    const me = rig.me, op = rig.op;
+    let target = 0, tension = 0;
+    if (game) {
+      target = game.ended ? fx.finalTarget : clamp((game.state.scores[you] - game.state.scores[1 - you]) / 5, -0.85, 0.85);
+      tension = tensionOf();
+    }
+    fx.lean += (target - fx.lean) * (1 - Math.exp(-dt * 5));
+    fx.kick *= Math.exp(-dt * 6);
+    const l = clamp(fx.lean + fx.kick, -1, 1), a = Math.abs(l), shake = 0.004 + 0.012 * tension;
+    const phi = PHI0 + a * (-Math.PI / 2 - PHI0);
+    const loserX = l >= 0 ? EXO : EXM, sign = l >= 0 ? 1 : -1;
+    C.set(loserX + sign * R * Math.sin(phi) + rnd() * shake, EY + R * Math.cos(phi) + rnd() * shake, rnd() * shake);
+    const dy = C.y - EY, slide = Math.sqrt(Math.max(0, R * R - dy * dy));
+    if (l >= 0) { eMe.set(C.x + slide, EY, EZ); eOpp.set(EXO, EY, -EZ); }
+    else { eOpp.set(C.x - slide, EY, -EZ); eMe.set(EXM, EY, EZ); }
+    me.shR.getWorldPosition(sMe);
+    sMe.x += (eMe.x - EXM) * 0.45;
+    op.shR.getWorldPosition(sOpp);
+    sOpp.x += (eOpp.x - EXO) * 0.45;
+    // Las manos se juntan al arrancar: de la pose de "listos" al agarre.
+    const e = ease(clamp((performance.now() - M.joinAt) / 1400, 0, 1));
+    eMe.lerpVectors(E0m, eMe, e);
+    eOpp.lerpVectors(E0o, eOpp, e);
+    Cm.lerpVectors(G0m, C, e);
+    Co.lerpVectors(G0o, C, e);
+    poseArm(me.arms[0], sMe, eMe, Cm, eOpp);
+    poseArm(op.arms[0], sOpp, eOpp, Co, eMe);
+    const faceFor = adv => (adv > 0.35 ? 'smug' : adv < -0.8 ? 'surprised' : adv < -0.3 ? 'angry' : 'normal');
+    setFace(op.face, faceFor(-l));
+    setFace(me.face, faceFor(l));
+    return { l, tension };
+  }
+
+  // ----- Cámara y cuadro a cuadro -----
+  const INTRO_P = new THREE.Vector3(5.0, 2.3, -0.3), INTRO_L = new THREE.Vector3(0, 1.2, 0);
+  const NAMES_P = new THREE.Vector3(3.0, 1.95, 0.9), NAMES_L = new THREE.Vector3(0, 1.5, 0);
+  const camP = new THREE.Vector3(0, 2, 5), camL = new THREE.Vector3(0, 1.3, 0), tP = V(), tL = V();
+  const LK = V(), BOB = V(), LFT = V();
+  let camFov = 46, clock = 0, lastTime = performance.now();
+
+  function tag(id, B, on) {
+    const el = $(id);
+    el.style.display = on ? 'block' : 'none';
+    if (!on) return;
+    B.head.getWorldPosition(SH);
+    SH.y += 0.5;
+    camera.updateMatrixWorld();
+    SH.project(camera);
+    el.style.left = (SH.x * 0.5 + 0.5) * innerWidth + 'px';
+    el.style.top = (-SH.y * 0.5 + 0.5) * innerHeight + 'px';
+  }
+
+  function update(dt) {
+    const yi = you < 0 ? 0 : you;
+    if (builtFor !== yi) buildPeople(yi);
+    clock += dt;
+    M.t += dt;
+    if (M.name === 'intro' && M.t > 8.2) { M.name = 'names'; if (api.onNames) api.onNames(); }
+    const inFight = M.name === 'fight' || M.name === 'menu';
+    const bodies = [rig.me, rig.op];
+    bodies.forEach(B => {
+      const r = stage(B, dt);
+      freeArm(B, r.a, r.sw);
+      if (!inFight) readyArm(B, r.a, -r.sw);
+    });
+    const f = inFight ? fight(dt) : { l: 0, tension: 0 };
+    if (!inFight) bodies.forEach(B => setFace(B.face, 'normal'));
+    bodies.forEach(B => {
+      B.head.rotation.y = Math.sin(clock * 0.6 + B.sgn) * 0.07 - B.pivot.rotation.y * 0.8;
+      B.head.rotation.x = 0.08 + 0.1 * f.tension;
+      const blink = (clock * 1000 + (B.sgn > 0 ? 0 : 1300)) % 3400 < 130 ? 0.15 : 1;
+      B.face.eyes.forEach(m => { m.scale.y = B.face.e.eye * blink; });
+    });
+
+    BOB.set(0, 0, 0);
+    let roll = 0, pitch = 0;
+    const v = VIEWS[view], fp = v.firstPerson;
+    let fovT;
+    if (M.name === 'menu') {
+      const an = clock * 0.14;
+      tP.set(Math.sin(an) * 4.4, 2.4, Math.cos(an) * 4.4);
+      tL.set(0, 1.35, 0);
+      fovT = 46;
+    } else if (M.name === 'intro' || M.name === 'names') {
+      // Primera persona: la cámara son los ojos de tu personaje al caminar, sentarse y mirar al rival.
+      const me = rig.me;
+      me.head.getWorldPosition(tP);
+      fwd.set(Math.sin(me.ry), 0, Math.cos(me.ry));
+      tP.y += 0.165;
+      tP.addScaledVector(fwd, 0.1);
+      LK.copy(tP).addScaledVector(fwd, 4);
+      LK.y -= 0.3;
+      rig.op.head.getWorldPosition(tL);
+      tL.y += 0.1;
+      tL.lerpVectors(LK, tL, nz(0.25, 1, me.s));
+      LK.set(me.chair.position.x, 1.0, me.chair.position.z);   // al correr la silla, la cámara la enfoca
+      tL.lerp(LK, me.reach * 0.85);
+      fovT = 64;
+      const wkb = me.wk, php = me.ph || 0;   // balanceo sincronizado con los pasos
+      LFT.set(Math.cos(me.ry), 0, -Math.sin(me.ry));
+      BOB.addScaledVector(LFT, Math.sin(php) * 0.035 * wkb);
+      BOB.y = (Math.abs(Math.sin(php)) - 0.5) * 0.03 * wkb;
+      roll = Math.sin(php) * 0.02 * wkb;
+      pitch = (0.5 - Math.abs(Math.sin(php))) * 0.025 * wkb;
+    } else {
+      tP.copy(v.pos);
+      tL.copy(v.look);
+      fovT = v.fov;
+      if (fp) {   // cuando vas perdiendo te vas "metiendo" hacia la mesa
+        const ls = Math.max(0, -f.l);
+        tP.y -= 0.12 * ls;
+        tP.z -= 0.15 * ls;
+      }
+    }
+    const k = M.snap ? 1 : 1 - Math.exp(-dt * (M.name === 'intro' ? 12 : 3.2));
+    M.snap = false;
+    camP.lerp(tP, k);
+    camL.lerp(tL, k);
+    camFov += (fovT - camFov) * k;
+    const cs = M.name === 'fight' ? 0.002 + 0.012 * f.tension : 0.0015;
+    camera.position.set(camP.x + rnd() * cs, camP.y + rnd() * cs, camP.z);
+    camera.position.add(BOB);
+    camera.fov = camFov;
+    camera.updateProjectionMatrix();
+    camera.lookAt(camL);
+    camera.rotateZ(roll);
+    camera.rotateX(pitch);
+    if (M.name === 'fight' && fp) camera.rotateZ(0.07 * f.l);
+    // En primera persona tu propio cuerpo desaparece cuando la cámara llega a tu cabeza.
+    const hide = M.name === 'intro' || M.name === 'names' || (M.name === 'fight' && (performance.now() - M.joinAt < 600 || (fp && camera.position.distanceTo(v.pos) < 1)));
+    rig.me.g.visible = !hide;
+    rig.me.arms.forEach(A => { A.upper.visible = !hide; });
+    tag('tag0', rig.me, false);
+    tag('tag1', rig.op, M.name === 'names');
+  }
+
+  function frame3d() {
+    const now = performance.now();
+    const dt = Math.min(0.05, (now - lastTime) / 1000);
+    lastTime = now;
+    update(dt);
+    renderer.render(scene, camera);
+  }
+
+  function resize() {
+    renderer.setSize(innerWidth, innerHeight, false);
+    camera.aspect = innerWidth / innerHeight;
+    camera.updateProjectionMatrix();
+  }
+
+  const api = {
+    frame: frame3d,
+    resize,
+    toggleView() { view = view === 'fp' ? 'tp' : 'fp'; },
+    skip() { if (M.name === 'intro') M.t = 20; },
+    setMode(n) {
+      M.name = n;
+      M.snap = n !== 'fight';
+      if (n === 'intro') { M.t = 0; builtFor = -1; }
+      else if (n === 'menu') M.t = 99;
+      else if (n === 'fight') { M.t = Math.max(M.t, 99); M.joinAt = performance.now(); }
+    },
+    onNames: null,
+    get view() { return view; }
+  };
+  S3 = api;
+  resize();
+  return api;
+}
+
+// ---------- Bucle principal ----------
+function frame() {
+  if (S3) { try { S3.frame(); } catch (err) { console.error(err); } }
+  if (game && ctxs.you) {
+    const t = serverNow();
+    const s = game.state;
+    const rival = 1 - you;
+
+
+    const flashFor = idx => {
+      if (game.last && game.last.player === idx && Date.now() - game.lastAt < 250) {
+        return game.last.hit ? '#8fae6f' : '#d8412f';
+      }
+      return null;
+    };
+
+    drawDial(ctxs.you, s.arrows[you], s.zones[you], game.halfWidth, t, flashFor(you));
+    drawDial(ctxs.rival, s.arrows[rival], s.zones[rival], game.halfWidth, t, flashFor(rival));
+
+    $('s-you').textContent = s.scores[you];
+    $('s-rival').textContent = s.scores[rival];
+    $('timer').textContent = Math.max(0, Math.ceil((game.endAt - t) / 1000));
+
+    if (t < game.startAt) {
+      const n = Math.ceil((game.startAt - t) / 1000);
+      $('big').textContent = n;
+      if (n !== game.lastCount) { game.lastCount = n; play('tick'); }
+    } else {
+      if (!game.wentGo) { game.wentGo = true; play('go'); }
+      $('big').textContent = t < game.startAt + 600 ? '¡Ya!' : '';
+    }
+
+    // Latido: arranca tranquilo y se acelera a medida que las flechas van más rápido.
+    if (audio.ac && !game.ended && t >= game.startAt && audio.ac.currentTime >= audio.nextBeat) {
+      play('beat');
+      audio.nextBeat = audio.ac.currentTime + 60 / (66 + 90 * tensionOf());
+    }
+  }
+  requestAnimationFrame(frame);
+}
+
+fetch('/config.json').then(r => r.json()).then(c => { if (c.publicUrl) publicOrigin = c.publicUrl; }).catch(() => {});
+try { initScene(); } catch (err) { console.error(err); }
+if (S3) S3.onNames = () => {
+  $('stage').classList.add('names');
+  $('namecard').hidden = false;
+  $('myname').focus();
+};
+$('skip').onclick = () => S3 && S3.skip();
+$('myname').addEventListener('input', () => send({ type: 'name', name: $('myname').value }));
+$('myname').addEventListener('keydown', e => { if (e.key === 'Enter') $('ready').click(); });
+$('ready').onclick = () => {
+  send({ type: 'name', name: $('myname').value, ready: true });
+  $('myname').disabled = true;
+  $('ready').disabled = true;
+  $('ready').textContent = 'Esperando…';
+};
+connect();
+frame();
+</script>
+</body>
+</html>
